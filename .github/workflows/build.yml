@@ -9,18 +9,16 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: |
-          pip install pywebview pyinstaller
+        run: pip install pywebview pyinstaller
       - name: Build exe
-        run: |
-          pyinstaller budget.spec
+        run: pyinstaller budget.spec
       - name: Upload exe
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: 가계부-Windows
           path: dist/가계부.exe
@@ -28,21 +26,18 @@ jobs:
   build-mac:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: |
-          pip install pywebview pyinstaller
+        run: pip install pywebview pyinstaller
       - name: Build app
-        run: |
-          pyinstaller budget.spec
+        run: pyinstaller budget.spec
       - name: Zip app
-        run: |
-          cd dist && zip -r 가계부-Mac.zip 가계부.app
+        run: cd dist && zip -r 가계부-Mac.zip 가계부.app
       - name: Upload app
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: 가계부-Mac
           path: dist/가계부-Mac.zip
