@@ -511,76 +511,86 @@ function parseAssetSheet(ws) {
     "부동산":"skip","동산":"skip","기타 실물 자산":"skip","보험 자산":"skip","연금 자산":"skip"
   };
 
-  // 5.투자현황과 6.대출현황도 파싱
   var inInvest = false, inLoan = false;
 
+  // 재무현황 섹션 시작 행 찾기 (항목/상품명/금액 헤더 행)
+  var dataStart = 0;
   for (var i=0; i<raw.length; i++) {
     var r = raw[i];
     var a0=String(r[0]||"").trim();
     var a1=String(r[1]||"").trim();
-    var a3=String(r[3]||"").replace(/,/g,"").trim(); // 자산 금액은 r[3]
-    var b4=String(r[4]||"").trim();                  // 부채 항목구분
-    var b5=String(r[5]||"").trim();                  // 부채 상품명
-    var b7=String(r[7]||"").replace(/,/g,"").trim(); // 부채 금액은 r[7]
+    // "항목" "상품명" "금액" 헤더 행 감지
+    if (a0==="항목" && a1==="상품명") {
+      dataStart = i + 1;
+      console.log("재무현황 데이터 시작 행:", dataStart);
+      break;
+    }
+  }
 
-    // 섹션 전환 감지
+  for (var i=dataStart; i<raw.length; i++) {
+    var r = raw[i];
+    var a0=String(r[0]||"").trim();
+    var a1=String(r[1]||"").trim();
+    var a3=String(r[3]||"").replace(/,/g,"").trim();
+    var b5=String(r[5]||"").trim();
+    var b7=String(r[7]||"").replace(/,/g,"").trim();
+
+    // 투자현황/대출현황 섹션 진입
     if (a0==="5.투자현황") { inInvest=true; inLoan=false; assetSection="done"; continue; }
     if (a0==="6.대출현황") { inLoan=true; inInvest=false; assetSection="done"; continue; }
-    if (a0==="4.보험현황"||a0==="7."||a0==="총계") { inInvest=false; inLoan=false; continue; }
+    if (a0==="4.보험현황") { inInvest=false; inLoan=false; assetSection="done"; continue; }
 
-    // 투자현황 파싱 (행85: r[2]=상품명, r[4]=투자원금, r[5]=평가금액)
+    // 투자현황 파싱
     if (inInvest) {
       var iName=String(r[2]||"").trim();
       var iPurchase=parseFloat(String(r[4]||"").replace(/,/g,""));
       var iCurrent=parseFloat(String(r[5]||"").replace(/,/g,""));
       if (iName && !isNaN(iPurchase) && iPurchase>0 && a0!=="투자상품종류" && a0!=="총계") {
         console.log("투자 발견:", iName, "원금:", iPurchase, "평가:", iCurrent);
-        // 기존 fromAsset 교체
-        assetData.investments = (assetData.investments||[]).filter(function(x){return x.name!==iName||!x.fromAsset;});
+        assetData.investments = (assetData.investments||[]).filter(function(x){return !(x.name===iName&&x.fromAsset);});
         assetData.investments.push({name:iName, purchase:iPurchase, current:iCurrent||iPurchase, fromAsset:true});
       }
       continue;
     }
 
-    // 대출현황 파싱 (행92: r[2]=상품명, r[5]=대출잔액)
+    // 대출현황 파싱
     if (inLoan) {
       var lName=String(r[2]||"").trim();
       var lAmt=parseFloat(String(r[5]||"").replace(/,/g,""));
       if (lName && !isNaN(lAmt) && lAmt>0 && a0!=="대출종류" && a0!=="총계") {
         console.log("대출(부채) 발견:", lName, lAmt);
-        // 기존 자산 섹션 부채와 중복 방지
         var exists = debts.some(function(d){return d.name===lName;});
         if (!exists) debts.push({name:lName, type:"대출", amount:lAmt});
       }
       continue;
     }
 
-    // 자산 섹션 감지 (r[0])
-    if (ASSET_SEC_MAP[a0] !== undefined) {
-      assetSection = ASSET_SEC_MAP[a0];
-      // 섹션 헤더 행에도 데이터가 있을 수 있음 (예: 행39, 행55, 행62)
-    }
-
-    // 합계/순자산 스킵
+    // 총자산/순자산 스킵
     if (a0==="총자산"||a0==="순자산"||a1==="총자산"||a1==="순자산") continue;
 
-    // 자산 파싱: r[1]=상품명, r[3]=금액
-    var name = a1;
-    var amt = parseFloat(a3);
-    if (name && !isNaN(amt) && amt>0 && assetSection!=="none" && assetSection!=="skip" && assetSection!=="done") {
-      console.log("자산 발견:", assetSection, name, amt);
-      if (assetSection==="free") freeAccounts.push({name:name, amount:amt});
-      else if (assetSection==="saving") savingAccounts.push({name:name, amount:amt});
-      else if (assetSection==="invest") investAccounts.push({name:name, amount:amt});
+    // 자산 섹션 감지
+    if (ASSET_SEC_MAP[a0] !== undefined) {
+      assetSection = ASSET_SEC_MAP[a0];
     }
 
-    // 부채 파싱: r[5]=상품명, r[7]=금액 (자산 섹션 헤더 행에 같이 있음)
+    // 자산 파싱: r[1]=상품명, r[3]=금액
+    if (a1 && assetSection!=="none" && assetSection!=="skip" && assetSection!=="done") {
+      var amt = parseFloat(a3);
+      if (!isNaN(amt) && amt>0) {
+        console.log("자산 발견:", assetSection, a1, amt);
+        if (assetSection==="free") freeAccounts.push({name:a1, amount:amt});
+        else if (assetSection==="saving") savingAccounts.push({name:a1, amount:amt});
+        else if (assetSection==="invest") investAccounts.push({name:a1, amount:amt});
+      }
+    }
+
+    // 부채 파싱: r[5]=상품명, r[7]=금액 (자산 헤더행에 같이 있음)
     if (b5 && b7) {
       var dAmt = parseFloat(b7);
       if (!isNaN(dAmt) && dAmt>0) {
-        console.log("부채 발견:", b4, b5, dAmt);
+        console.log("부채 발견:", b5, dAmt);
         var exists = debts.some(function(d){return d.name===b5;});
-        if (!exists) debts.push({name:b5, type:b4, amount:dAmt});
+        if (!exists) debts.push({name:b5, type:"부채", amount:dAmt});
       }
     }
   }
@@ -820,7 +830,7 @@ function renderCalendarPage() {
     var isToday=td.getFullYear()===curYear&&td.getMonth()+1===curMonth&&td.getDate()===d;
     var dm=dayMap[d];
     html+='<div class="cal-cell'+(isToday?" today":"")+'" onclick="showDayModal('+d+')">'+'<div class="cal-date">'+d+'</div>';
-    if(dm){if(dm.exp>0)html+='<div class="cal-exp">-'+fmtShort(dm.exp)+'</div>';if(dm.inc>0)html+='<div class="cal-inc">+'+fmtShort(dm.inc)+'</div>';}
+    if(dm){if(dm.exp>0)html+='<div class="cal-exp">-'+fmt(dm.exp)+'</div>';if(dm.inc>0)html+='<div class="cal-inc">+'+fmt(dm.inc)+'</div>';}
     html+='</div>';
   }
   var remain=(7-(startDow+lastDay)%7)%7;
@@ -864,7 +874,7 @@ function renderTransactions() {
     html+='<tr><td>'+r.date.slice(5)+'</td><td><span class="badge '+(isInc?"inc":"exp")+'">'+r.type+'</span></td>'
       +'<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.name+'</td>'
       +'<td><span class="cat-badge">'+r.cat+'</span></td>'
-      +'<td class="text-right num" style="font-weight:600;color:'+(isInc?"var(--blue)":"var(--text)")+'">'+(isInc?"+":"-")+fmt(r.amount)+'</td>'
+      +'<td class="text-right num" style="font-weight:600;color:'+(isInc?"var(--blue)":"var(--red)")+'">'+(isInc?"+":"-")+fmt(r.amount)+'</td>'
       +'<td style="color:var(--text3);font-size:10px">'+(r.memo||"")+'</td>'
       +'<td style="white-space:nowrap"><button class="action-btn" onclick="editTx('+idx+')">수정</button> <button class="action-btn del" onclick="deleteTx('+idx+')">삭제</button></td></tr>';
   });
