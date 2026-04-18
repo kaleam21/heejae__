@@ -4,7 +4,6 @@ import os
 import sys
 from pathlib import Path
 
-# 데이터 저장 경로
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys.executable).parent
 else:
@@ -16,8 +15,12 @@ DATA_FILE = BASE_DIR / 'budget_data.json'
 def load_data():
     if DATA_FILE.exists():
         with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {'transactions': [], 'fixed': [], 'settings': {}}
+            data = json.load(f)
+            if 'customCats' not in data: data['customCats'] = []
+            if 'assetData' not in data: data['assetData'] = {'accounts':[],'debts':[],'investments':[]}
+            if 'fixed' not in data: data['fixed'] = []
+            return data
+    return {'transactions':[], 'fixed':[], 'customCats':[], 'assetData':{'accounts':[],'debts':[],'investments':[]}}
 
 
 def save_data(data):
@@ -38,6 +41,13 @@ class Api:
     def save_fixed(self, fixed):
         data = load_data()
         data['fixed'] = fixed
+        save_data(data)
+        return {'ok': True}
+
+    def save_custom(self, customCats, assetData):
+        data = load_data()
+        data['customCats'] = customCats
+        data['assetData'] = assetData
         save_data(data)
         return {'ok': True}
 
@@ -62,7 +72,7 @@ class Api:
         return {'ok': True}
 
     def clear_all(self):
-        save_data({'transactions': [], 'fixed': [], 'settings': {}})
+        save_data({'transactions':[], 'fixed':[], 'customCats':[], 'assetData':{'accounts':[],'debts':[],'investments':[]}})
         return {'ok': True}
 
 
@@ -71,12 +81,12 @@ if __name__ == '__main__':
     html_path = BASE_DIR / 'app.html'
 
     window = webview.create_window(
-        title='💰 내 가계부',
+        title='내 가계부 v1.1.0',
         url=str(html_path),
         js_api=api,
-        width=1200,
-        height=800,
-        min_size=(900, 600),
+        width=1280,
+        height=820,
+        min_size=(960, 640),
         background_color='#0f0f0f'
     )
 
