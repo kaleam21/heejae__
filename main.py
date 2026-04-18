@@ -1,15 +1,19 @@
 import webview
 import json
-import os
 import sys
 from pathlib import Path
 
+# 실행 환경에 따라 경로 설정
 if getattr(sys, 'frozen', False):
-    BASE_DIR = Path(sys.executable).parent
+    # PyInstaller로 빌드된 exe 실행 시
+    BASE_DIR = Path(sys._MEIPASS)
+    DATA_DIR = Path(sys.executable).parent
 else:
     BASE_DIR = Path(__file__).parent
+    DATA_DIR = BASE_DIR
 
-DATA_FILE = BASE_DIR / 'budget_data.json'
+DATA_FILE = DATA_DIR / 'budget_data.json'
+HTML_FILE = BASE_DIR / 'app.html'
 
 
 def load_data():
@@ -19,8 +23,15 @@ def load_data():
             if 'customCats' not in data: data['customCats'] = []
             if 'assetData' not in data: data['assetData'] = {'accounts':[],'debts':[],'investments':[]}
             if 'fixed' not in data: data['fixed'] = []
+            if 'includeDebtInNet' not in data: data['includeDebtInNet'] = False
             return data
-    return {'transactions':[], 'fixed':[], 'customCats':[], 'assetData':{'accounts':[],'debts':[],'investments':[]}}
+    return {
+        'transactions': [],
+        'fixed': [],
+        'customCats': [],
+        'assetData': {'accounts':[],'debts':[],'investments':[]},
+        'includeDebtInNet': False
+    }
 
 
 def save_data(data):
@@ -44,45 +55,31 @@ class Api:
         save_data(data)
         return {'ok': True}
 
-    def save_custom(self, customCats, assetData):
+    def save_custom(self, customCats, assetData, includeDebtInNet=False):
         data = load_data()
         data['customCats'] = customCats
         data['assetData'] = assetData
+        data['includeDebtInNet'] = includeDebtInNet
         save_data(data)
-        return {'ok': True}
-
-    def add_transaction(self, tx):
-        data = load_data()
-        data['transactions'].append(tx)
-        save_data(data)
-        return {'ok': True}
-
-    def update_transaction(self, idx, tx):
-        data = load_data()
-        if 0 <= idx < len(data['transactions']):
-            data['transactions'][idx] = tx
-            save_data(data)
-        return {'ok': True}
-
-    def delete_transaction(self, idx):
-        data = load_data()
-        if 0 <= idx < len(data['transactions']):
-            data['transactions'].pop(idx)
-            save_data(data)
         return {'ok': True}
 
     def clear_all(self):
-        save_data({'transactions':[], 'fixed':[], 'customCats':[], 'assetData':{'accounts':[],'debts':[],'investments':[]}})
+        save_data({
+            'transactions': [],
+            'fixed': [],
+            'customCats': [],
+            'assetData': {'accounts':[],'debts':[],'investments':[]},
+            'includeDebtInNet': False
+        })
         return {'ok': True}
 
 
 if __name__ == '__main__':
     api = Api()
-    html_path = BASE_DIR / 'app.html'
 
     window = webview.create_window(
         title='내 가계부 v1.1.0',
-        url=str(html_path),
+        url=str(HTML_FILE),
         js_api=api,
         width=1280,
         height=820,
