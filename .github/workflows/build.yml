@@ -38,15 +38,9 @@ jobs:
           $ver = "${{ steps.version.outputs.VERSION }}"
           (Get-Content installer.nsi) -replace '!define APP_VERSION ".*"', "!define APP_VERSION `"$ver`"" | Set-Content installer.nsi
 
-      - name: Copy files for NSIS
-        run: |
-          copy dist\가계부.exe .
-          copy dist\updater.exe .
-
       - name: Build installer
         run: |
-          $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          & $nsis installer.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
