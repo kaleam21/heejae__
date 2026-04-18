@@ -1,14 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import sys
-
 block_cipher = None
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('app.html', '.')],
+    datas=[],
     hiddenimports=[
         'webview',
         'webview.platforms.winforms',
