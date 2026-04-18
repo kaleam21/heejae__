@@ -18,9 +18,7 @@ jobs:
       - name: Build 가계부.exe
         run: pyinstaller budget.spec
       - name: Build updater.exe
-        run: pyinstaller updater.spec
-      - name: Move updater to dist
-        run: copy dist\updater.exe dist\updater.exe
+        run: pyinstaller --onefile --noconsole --name updater updater.py
       - name: Upload Windows
         uses: actions/upload-artifact@v4
         with:
