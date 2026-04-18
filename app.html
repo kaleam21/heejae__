@@ -299,7 +299,46 @@ tr:hover td{background:var(--bg3)}
   </div>
 </div>
 
-<!-- 업데이트 노트 모달 -->
+<!-- 관리자 모달 -->
+<div class="modal-overlay hidden" id="admin-modal" onclick="if(event.target===this)document.getElementById('admin-modal').classList.add('hidden')">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-title">
+      <span>🔧 관리자 모드</span>
+      <button class="modal-close" onclick="document.getElementById('admin-modal').classList.add('hidden')">×</button>
+    </div>
+    <div style="margin-bottom:1rem">
+      <div class="card-title" style="margin-bottom:.5rem">파싱 로그</div>
+      <div id="admin-log" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:11px;font-family:monospace;color:#22C55E;height:300px;overflow-y:auto;white-space:pre-wrap;line-height:1.6">로그가 여기 표시됩니다...</div>
+    </div>
+    <div style="margin-bottom:1rem">
+      <div class="card-title" style="margin-bottom:.5rem">현재 파싱된 자산 데이터</div>
+      <div id="admin-asset-info" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:11px;font-family:monospace;color:#3B82F6;max-height:200px;overflow-y:auto;white-space:pre-wrap;line-height:1.6">-</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="adminRefresh()">🔄 데이터 새로고침</button>
+      <button class="btn" onclick="adminClearLog()">로그 지우기</button>
+      <button class="btn btn-danger" onclick="if(confirm('모든 데이터 삭제?'))clearAll()">데이터 초기화</button>
+      <button class="btn btn-primary" onclick="document.getElementById('admin-modal').classList.add('hidden')">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 관리자 키 입력 모달 -->
+<div class="modal-overlay hidden" id="admin-key-modal" onclick="if(event.target===this)document.getElementById('admin-key-modal').classList.add('hidden')">
+  <div class="modal" style="max-width:320px">
+    <div class="modal-title"><span>🔑 관리자 로그인</span><button class="modal-close" onclick="document.getElementById('admin-key-modal').classList.add('hidden')">×</button></div>
+    <div class="form-group" style="margin-bottom:.75rem">
+      <label class="form-label">관리자 키</label>
+      <input type="password" class="form-input" id="admin-key-input" placeholder="관리자 키를 입력하세요" onkeydown="if(event.key==='Enter')checkAdminKey()"/>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="document.getElementById('admin-key-modal').classList.add('hidden')">취소</button>
+      <button class="btn btn-primary" onclick="checkAdminKey()">확인</button>
+    </div>
+  </div>
+</div>
+
+<!-- 관리자 모달 --><!-- 업데이트 노트 모달 -->
 <div class="modal-overlay hidden" id="update-modal" onclick="if(event.target===this)document.getElementById('update-modal').classList.add('hidden')">
   <div class="modal">
     <div class="modal-title"><span>📋 업데이트 노트</span><button class="modal-close" onclick="document.getElementById('update-modal').classList.add('hidden')">×</button></div>
@@ -967,6 +1006,7 @@ function renderSettings() {
     +'고정지출: <b>'+fixedList.length+'건</b>'
     +'</div>'
     +'<div style="margin-top:.75rem;display:flex;gap:8px;flex-wrap:wrap">'
+    +'<button class="btn" onclick="showAdminKeyModal()">🔧 관리자</button>'
     +'<button class="btn" onclick="document.getElementById(\'update-modal\').classList.remove(\'hidden\')">📋 업데이트 노트</button>'
     +'<button class="btn" style="background:var(--yellow-bg);color:var(--yellow);border-color:var(--yellow)" onclick="openPaypal()">☕ 후원하기</button>'
     +'<button class="btn btn-danger" onclick="if(confirm(\'모든 데이터를 삭제할까요?\'))clearAll()">데이터 초기화</button>'
@@ -1070,6 +1110,69 @@ function showDayModal(day){
 }
 
 function showUploadModal(){document.getElementById("upload-modal").classList.remove("hidden");}
+// ── 관리자 모드 ──────────────────────────────────────────
+var ADMIN_KEY = "kaleam21";
+var adminLogs = [];
+
+function adminLog(msg) {
+  var time = new Date().toLocaleTimeString();
+  adminLogs.push("["+time+"] "+msg);
+  var el = document.getElementById("admin-log");
+  if (el) { el.textContent = adminLogs.join("\n"); el.scrollTop = el.scrollHeight; }
+}
+
+// console.log 가로채기
+var origLog = console.log;
+console.log = function() {
+  var args = Array.prototype.slice.call(arguments);
+  adminLog(args.join(" "));
+  origLog.apply(console, arguments);
+};
+
+function showAdminKeyModal() {
+  document.getElementById("admin-key-input").value = "";
+  document.getElementById("admin-key-modal").classList.remove("hidden");
+  setTimeout(function(){document.getElementById("admin-key-input").focus();}, 100);
+}
+
+function checkAdminKey() {
+  var key = document.getElementById("admin-key-input").value.trim();
+  if (key === ADMIN_KEY) {
+    document.getElementById("admin-key-modal").classList.add("hidden");
+    openAdminModal();
+  } else {
+    alert("관리자 키가 틀렸어요.");
+    document.getElementById("admin-key-input").value = "";
+  }
+}
+
+function openAdminModal() {
+  adminRefresh();
+  document.getElementById("admin-modal").classList.remove("hidden");
+}
+
+function adminRefresh() {
+  var info = "";
+  info += "=== 자유입출금 (" + (assetData.freeAccounts||[]).length + "건) ===\n";
+  (assetData.freeAccounts||[]).forEach(function(a){ info += "  "+a.name+" : "+a.amount.toLocaleString()+"원\n"; });
+  info += "\n=== 저축성 (" + (assetData.savingAccounts||[]).length + "건) ===\n";
+  (assetData.savingAccounts||[]).forEach(function(a){ info += "  "+a.name+" : "+a.amount.toLocaleString()+"원\n"; });
+  info += "\n=== 투자성 (" + (assetData.investAccounts||[]).length + "건) ===\n";
+  (assetData.investAccounts||[]).forEach(function(a){ info += "  "+a.name+" : "+a.amount.toLocaleString()+"원\n"; });
+  info += "\n=== 부채 (" + (assetData.debts||[]).length + "건) ===\n";
+  (assetData.debts||[]).forEach(function(d){ info += "  "+d.name+" : "+d.amount.toLocaleString()+"원\n"; });
+  info += "\n=== 투자현황 (" + (assetData.investments||[]).length + "건) ===\n";
+  (assetData.investments||[]).forEach(function(v){ info += "  "+v.name+" 매입:"+v.purchase.toLocaleString()+" 현재:"+v.current.toLocaleString()+"\n"; });
+  var el = document.getElementById("admin-asset-info");
+  if (el) el.textContent = info || "데이터 없음";
+}
+
+function adminClearLog() {
+  adminLogs = [];
+  var el = document.getElementById("admin-log");
+  if (el) el.textContent = "로그가 여기 표시됩니다...";
+}
+
 function openPaypal(){
   if(window.pywebview && window.pywebview.api && window.pywebview.api.open_url) {
     window.pywebview.api.open_url("https://www.paypal.com/ncp/payment/N2YXWK2CBTY3N");
