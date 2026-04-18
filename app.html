@@ -505,6 +505,17 @@ function parseAssetSheet(ws) {
 
   console.log("=== 재무현황 시트 파싱 시작, 총 행수:", raw.length);
 
+  // 전체 행 구조 출력 (자산 섹션 찾기용)
+  for (var i=0; i<raw.length; i++) {
+    var r = raw[i];
+    var cells = [];
+    for (var c=0; c<8; c++) {
+      var v = String(r[c]||"");
+      if (v) cells.push("r["+c+"]="+v);
+    }
+    if (cells.length > 0) console.log("행"+i+":", cells.join(" | "));
+  }
+
   var ASSET_SEC_MAP = {
     "자유입출금 자산": "free",
     "저축성 자산": "saving",
@@ -528,17 +539,14 @@ function parseAssetSheet(ws) {
     var d4=String(r[4]||"").trim();
     var d5=String(r[5]||"").replace(/,/g,"").trim();
 
-    // 자산 섹션 감지 (A열)
     if (ASSET_SEC_MAP[a0] !== undefined) {
       assetSection = ASSET_SEC_MAP[a0];
       console.log("섹션 변경:", a0, "->", assetSection);
       continue;
     }
 
-    // 합계/순자산 행 스킵
     if (a1==="총자산"||a1==="순자산"||a0==="총자산"||a0==="순자산") continue;
 
-    // 자산 파싱 (B열=상품명, C열=금액)
     if (a1 && assetSection!=="none" && assetSection!=="skip") {
       var amtA = parseFloat(a2);
       if (!isNaN(amtA) && amtA > 0) {
@@ -549,7 +557,6 @@ function parseAssetSheet(ws) {
       }
     }
 
-    // 부채 파싱 (E열=상품명, F열=금액)
     if (d4) {
       var amtD = parseFloat(d5);
       if (!isNaN(amtD) && amtD > 0) {
