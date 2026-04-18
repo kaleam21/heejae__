@@ -351,6 +351,7 @@ var DEFAULT_MAP = {
 };
 
 var allTx = [], fixedList = [], customCats = [], assetData = {accounts:[], debts:[], investments:[]};
+var includeDebtInNet = false;
 var userCats = DEFAULT_CATS.slice();
 var curYear = new Date().getFullYear(), curMonth = new Date().getMonth()+1;
 var curPage = "dashboard";
@@ -383,13 +384,14 @@ async function pyLoad() {
     customCats = data.customCats || [];
     assetData = data.assetData || {accounts:[],debts:[],investments:[]};
     if (customCats.length) userCats = DEFAULT_CATS.concat(customCats.filter(function(c){return DEFAULT_CATS.indexOf(c)<0;}));
+    includeDebtInNet = data.includeDebtInNet || false;
   }
 }
 async function pySave() {
   if (window.pywebview && window.pywebview.api) {
     await window.pywebview.api.save_transactions(allTx);
     await window.pywebview.api.save_fixed(fixedList);
-    await window.pywebview.api.save_custom(customCats, assetData);
+    await window.pywebview.api.save_custom(customCats, assetData, includeDebtInNet);
   }
   updateFooter();
 }
@@ -433,23 +435,47 @@ function parseXlsx(data) {
 
 function parseAssetSheet(ws) {
   var raw = XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
-  var accounts = [], debts = [];
-  var inAsset = false, inDebt = false;
+  var freeAccounts = [], savingAccounts = [], investAccounts = [], otherAccounts = [], debts = [];
+  var currentSection = "";
+  var SECTION_KEYWORDS = {
+    "자유입출금 자산": "free",
+    "저축성 자산": "saving",
+    "투자성 자산": "invest",
+    "부채": "debt"
+  };
   for (var i=0; i<raw.length; i++) {
     var r = raw[i];
     var cell0 = String(r[0]||"").trim();
     var cell1 = String(r[1]||"").trim();
-    var cell3 = String(r[3]||"").trim();
-    if (cell0==="자산") { inAsset=true; inDebt=false; continue; }
-    if (cell0==="부채") { inDebt=true; inAsset=false; continue; }
-    if (cell1 && !isNaN(Number(String(r[3]||"").replace(/,/g,"")))) {
-      var amt = Number(String(r[3]||"").replace(/,/g,""));
-      if (inAsset && amt > 0) accounts.push({name:cell1, amount:amt, type:cell0||"자유입출금"});
-      if (inDebt && amt > 0) debts.push({name:cell1, amount:amt});
-    }
+    // 섹션 감지
+    var matched = false;
+    Object.keys(SECTION_KEYWORDS).forEach(function(k){ if(cell0.indexOf(k)>=0||cell1.indexOf(k)>=0){currentSection=SECTION_KEYWORDS[k];matched=true;} });
+    if(matched) continue;
+    // 계좌명과 금액 파싱 (r[1]=이름, r[3]=금액)
+    var name = cell1 || String(r[2]||"").trim();
+    var amtStr = String(r[3]||r[4]||"").replace(/,/g,"").trim();
+    var amt = parseFloat(amtStr);
+    if (!name || isNaN(amt) || amt <= 0) continue;
+    if (currentSection==="free") freeAccounts.push({name:name, amount:amt, section:"자유입출금"});
+    else if (currentSection==="saving") savingAccounts.push({name:name, amount:amt, section:"저축성"});
+    else if (currentSection==="invest") investAccounts.push({name:name, amount:amt, section:"투자성"});
+    else if (currentSection==="debt") debts.push({name:name, amount:amt});
   }
-  assetData.accounts = accounts;
+  assetData.freeAccounts = freeAccounts;
+  assetData.savingAccounts = savingAccounts;
+  assetData.investAccounts = investAccounts;
+  assetData.accounts = freeAccounts.concat(savingAccounts);
   assetData.debts = debts;
+  // 투자성 자산 자동으로 투자현황에 추가
+  if (investAccounts.length) {
+    var existNames = (assetData.investments||[]).map(function(x){return x.name;});
+    investAccounts.forEach(function(a){
+      if (existNames.indexOf(a.name)<0) {
+        if (!assetData.investments) assetData.investments=[];
+        assetData.investments.push({name:a.name, purchase:a.amount, current:a.amount, fromAsset:true});
+      }
+    });
+  }
 }
 
 function analyzeSuggestedFixed() {
@@ -457,14 +483,24 @@ function analyzeSuggestedFixed() {
   allTx.filter(function(r){return r.type==="지출";}).forEach(function(r){
     var key = r.name+"|"+r.amount;
     var month = r.date.substring(0,7);
-    if (!nameMonthMap[key]) nameMonthMap[key] = {name:r.name, amount:r.amount, months:new Set(), cat:r.cat};
+    var day = parseInt(r.date.split("-")[2]);
+    if (!nameMonthMap[key]) nameMonthMap[key] = {name:r.name, amount:r.amount, months:new Set(), cat:r.cat, dayCounts:{}};
     nameMonthMap[key].months.add(month);
+    nameMonthMap[key].dayCounts[day] = (nameMonthMap[key].dayCounts[day]||0) + 1;
   });
   var suggests = [];
   Object.values(nameMonthMap).forEach(function(v){
     if (v.months.size >= 2) {
       var alreadyFixed = fixedList.some(function(f){return f.name===v.name&&f.amount===v.amount;});
-      if (!alreadyFixed) suggests.push({name:v.name, amount:v.amount, months:v.months.size, cat:v.cat, checked:true});
+      if (!alreadyFixed) {
+        // 가장 많이 등장한 결제일 찾기
+        var bestDay = 1;
+        var maxCnt = 0;
+        Object.keys(v.dayCounts).forEach(function(d){
+          if(v.dayCounts[d] > maxCnt){ maxCnt=v.dayCounts[d]; bestDay=parseInt(d); }
+        });
+        suggests.push({name:v.name, amount:v.amount, months:v.months.size, cat:v.cat, day:bestDay, checked:true});
+      }
     }
   });
   suggests.sort(function(a,b){return b.months-a.months;});
@@ -492,7 +528,7 @@ function confirmSuggest() {
   pendingSuggests.forEach(function(s,i){
     var cb = document.getElementById("sug-"+i);
     if (cb && cb.checked) {
-      fixedList.push({name:s.name, amount:s.amount, day:1, cat:s.cat, memo:"자동감지"});
+      fixedList.push({name:s.name, amount:s.amount, day:s.day||1, cat:s.cat, memo:"자동감지"});
       added++;
     }
   });
@@ -736,8 +772,8 @@ function renderFixed() {
       +'</div>';
     html+='<div class="table-wrap"><table><thead><tr><th>서비스명</th><th>카테고리</th><th>결제일</th><th class="text-right">월금액</th><th class="text-right">누적금액</th><th>메모</th><th></th></tr></thead><tbody>';
     fixedList.forEach(function(r,idx){
-      // 누적금액: 실제 거래내역에서 해당 이름으로 집계
-      var accumulated = allTx.filter(function(t){return t.name===r.name&&t.type==="지출";}).reduce(function(a,t){return a+t.amount;},0);
+      // 누적금액: 동일 이름 + 동일 금액인 거래만 합산
+      var accumulated = allTx.filter(function(t){return t.name===r.name&&t.type==="지출"&&t.amount===r.amount;}).reduce(function(a,t){return a+t.amount;},0);
       html+='<tr><td>'+r.name+'</td><td><span class="cat-badge">'+r.cat+'</span></td><td>매월 '+r.day+'일</td>'
         +'<td class="text-right num" style="font-weight:600">'+fmt(r.amount)+'</td>'
         +'<td class="text-right num" style="color:var(--red)">'+fmt(accumulated)+'</td>'
@@ -811,38 +847,37 @@ function initGraph() {
 }
 
 function renderAssets() {
-  var accounts = assetData.accounts || [];
+  var freeAccounts = assetData.freeAccounts || [];
+  var savingAccounts = assetData.savingAccounts || [];
+  var investAccounts = assetData.investAccounts || [];
   var debts = assetData.debts || [];
-  var investments = assetData.investments || [];
-  var totalAsset = accounts.reduce(function(a,r){return a+r.amount;},0);
+  var totalAsset = freeAccounts.concat(savingAccounts).reduce(function(a,r){return a+r.amount;},0);
   var totalDebt = debts.reduce(function(a,r){return a+r.amount;},0);
-  var netAsset = totalAsset - totalDebt;
-
-  // 항목별 분류
-  var freeAccounts = accounts.filter(function(a){return a.type==="자유입출금"||a.type==="";});
-  var savingAccounts = accounts.filter(function(a){return a.type.indexOf("저축")>=0||a.type.indexOf("예금")>=0||a.type.indexOf("적금")>=0;});
-  var otherAccounts = accounts.filter(function(a){return freeAccounts.indexOf(a)<0&&savingAccounts.indexOf(a)<0;});
-
-  var html='<div class="summary-grid">'
-    +'<div class="sum-card"><div class="sum-label">총 자산</div><div class="sum-val blue num">'+fmt(totalAsset)+'</div></div>'
-    +'<div class="sum-card"><div class="sum-label">총 부채</div><div class="sum-val red num">'+fmt(totalDebt)+'</div></div>'
-    +'<div class="sum-card"><div class="sum-label">순 자산</div><div class="sum-val '+(netAsset>=0?"green":"red")+' num">'+fmt(netAsset)+'</div></div>'
-    +'</div>';
-
-  if (!accounts.length) {
-    html+='<div class="card"><div style="text-align:center;padding:2rem;color:var(--text3)">뱅크샐러드 엑셀을 업로드하면 자산현황이 자동으로 연동돼요<br><br><button class="btn btn-primary" onclick="showUploadModal()">엑셀 업로드</button></div></div>';
-    return html;
-  }
+  var netAsset = includeDebtInNet ? totalAsset - totalDebt : totalAsset;
 
   var makeAccountRows = function(list) {
     return list.map(function(a){return '<div class="asset-row"><span class="asset-name">'+a.name+'</span><span class="asset-val num">'+fmt(a.amount)+'</span></div>';}).join("");
   };
 
+  var html='<div class="summary-grid">'
+    +'<div class="sum-card"><div class="sum-label">총 자산</div><div class="sum-val blue num">'+fmt(totalAsset)+'</div></div>'
+    +'<div class="sum-card"><div class="sum-label">총 부채</div><div class="sum-val red num">'+fmt(totalDebt)+'</div></div>'
+    +'<div class="sum-card"><div class="sum-label">순 자산 '+(includeDebtInNet?"(부채포함)":"(부채제외)")+'</div><div class="sum-val '+(netAsset>=0?"green":"red")+' num">'+fmt(netAsset)+'</div>'
+    +'<div style="margin-top:.3rem"><label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text3);cursor:pointer">'
+    +'<input type="checkbox" '+(includeDebtInNet?"checked":"")+' onchange="includeDebtInNet=this.checked;pySave();render()"/>순자산에 부채 포함</label></div>'
+    +'</div>'
+    +'</div>';
+
+  if (!freeAccounts.length && !savingAccounts.length) {
+    html+='<div class="card"><div style="text-align:center;padding:2rem;color:var(--text3)">뱅크샐러드 엑셀을 업로드하면 자산현황이 자동으로 연동돼요<br><br><button class="btn btn-primary" onclick="showUploadModal()">엑셀 업로드</button></div></div>';
+    return html;
+  }
+
   html+='<div class="grid2">';
   html+='<div class="card">';
-  if(freeAccounts.length){html+='<div class="asset-section"><div class="asset-section-title">자유입출금 ('+fmt(freeAccounts.reduce(function(a,r){return a+r.amount;},0))+')</div>'+makeAccountRows(freeAccounts)+'</div>';}
+  if(freeAccounts.length){html+='<div class="asset-section"><div class="asset-section-title">자유입출금 자산 ('+fmt(freeAccounts.reduce(function(a,r){return a+r.amount;},0))+')</div>'+makeAccountRows(freeAccounts)+'</div>';}
   if(savingAccounts.length){html+='<div class="asset-section"><div class="asset-section-title">저축성 자산 ('+fmt(savingAccounts.reduce(function(a,r){return a+r.amount;},0))+')</div>'+makeAccountRows(savingAccounts)+'</div>';}
-  if(otherAccounts.length){html+='<div class="asset-section"><div class="asset-section-title">기타 자산 ('+fmt(otherAccounts.reduce(function(a,r){return a+r.amount;},0))+')</div>'+makeAccountRows(otherAccounts)+'</div>';}
+  if(investAccounts.length){html+='<div class="asset-section"><div class="asset-section-title">투자성 자산 → 투자현황 연동 ('+fmt(investAccounts.reduce(function(a,r){return a+r.amount;},0))+')</div>'+makeAccountRows(investAccounts)+'</div>';}
   html+='</div>';
 
   html+='<div class="card">';
@@ -852,7 +887,7 @@ function renderAssets() {
     html+='</div>';
   }
   html+='<div style="margin-top:.75rem;padding:.75rem;background:var(--bg3);border-radius:8px;display:flex;justify-content:space-between">'
-    +'<span style="font-size:12px;color:var(--text2)">순자산</span>'
+    +'<span style="font-size:12px;color:var(--text2)">순자산 '+(includeDebtInNet?"(부채포함)":"(부채제외)")+'</span>'
     +'<span style="font-size:16px;font-weight:700;color:'+(netAsset>=0?"var(--green)":"var(--red)")+'" class="num">'+fmt(netAsset)+'</span>'
     +'</div>';
   html+='</div>';
@@ -1008,6 +1043,14 @@ function showDayModal(day){
 }
 
 function showUploadModal(){document.getElementById("upload-modal").classList.remove("hidden");}
+function openPaypal(){
+  if(window.pywebview && window.pywebview.api && window.pywebview.api.open_url) {
+    window.pywebview.api.open_url("https://www.paypal.com/ncp/payment/N2YXWK2CBTY3N");
+  } else {
+    window.open("https://www.paypal.com/ncp/payment/N2YXWK2CBTY3N","_blank");
+  }
+}
+
 function clearAll(){allTx=[];fixedList=[];customCats=[];assetData={accounts:[],debts:[],investments:[]};userCats=DEFAULT_CATS.slice();if(window.pywebview&&window.pywebview.api)window.pywebview.api.clear_all();document.getElementById("upload-modal").classList.add("hidden");document.getElementById("upload-screen").classList.remove("hidden");document.getElementById("page-content").classList.add("hidden");updateFooter();}
 
 window.addEventListener("pywebviewready",async function(){
