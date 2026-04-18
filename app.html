@@ -340,7 +340,7 @@ var CAT_COLORS_MAP = {
 var DEFAULT_MAP = {
   "식비":"식비","배달":"식비","한식":"식비","일식":"식비","양식":"식비","중식":"식비","분식":"식비","패스트푸드":"식비","고기":"식비","카페/간식":"식비","커피/음료":"식비","기타간식":"식비",
   "교통":"교통비","대중교통":"교통비","택시":"교통비","시외버스":"교통비","기차":"교통비","항공":"교통비","자동차":"교통비",
-  "온라인쇼핑":"기타","인터넷쇼핑":"기타","서비스구독":"구독료","결제/충전":"기타",
+  "온라인쇼핑":"기타","인터넷쇼핑":"기타","서비스구독":"기타","결제/충전":"기타",
   "패션/쇼핑":"의류비","뷰티/미용":"의류비","헤어샵":"의류비","패션":"의류비","의류":"의류비",
   "주거/통신":"주거비","통신":"통신비","주거":"주거비",
   "문화/여가":"문화생활비","도서":"문화생활비","게임":"문화생활비","영화":"문화생활비","여행/숙박":"문화생활비",
@@ -436,49 +436,64 @@ function parseXlsx(data) {
 function parseAssetSheet(ws) {
   var raw = XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
   var freeAccounts = [], savingAccounts = [], investAccounts = [], debts = [];
-  var currentSection = "none";
-  // 섹션 키워드 정의 (cell0 기준)
-  var SKIP_SECTIONS = ["신탁 자산","현금 자산","전자금융 자산","부동산","동산","기타 실물 자산","보험 자산","연금 자산"];
-  function detectSection(cell0) {
-    if (cell0.indexOf("자유입출금 자산")>=0) return "free";
-    if (cell0.indexOf("저축성 자산")>=0) return "saving";
-    if (cell0.indexOf("투자성 자산")>=0) return "invest";
-    if (cell0.indexOf("부채")>=0 || cell0==="장기대출" || cell0==="단기대출") return "debt";
-    for (var s=0; s<SKIP_SECTIONS.length; s++) { if(cell0.indexOf(SKIP_SECTIONS[s])>=0) return "skip"; }
-    return null;
-  }
+  var assetSection = "none";
+
+  // A열(r[0]) 값으로 자산 섹션 판단
+  var ASSET_SECTIONS = {
+    "자유입출금 자산": "free",
+    "저축성 자산": "saving",
+    "투자성 자산": "invest",
+    "신탁 자산": "skip",
+    "현금 자산": "skip",
+    "전자금융 자산": "skip",
+    "부동산": "skip",
+    "동산": "skip",
+    "기타 실물 자산": "skip",
+    "보험 자산": "skip",
+    "연금 자산": "skip"
+  };
+
   for (var i=0; i<raw.length; i++) {
     var r = raw[i];
-    var cell0 = String(r[0]||"").trim();
-    var cell1 = String(r[1]||"").trim();
-    // 섹션 헤더 감지 (A열 기준)
-    var sec = detectSection(cell0);
-    if (sec !== null) { currentSection = sec; continue; }
-    // 부채 항목은 A열에 항목명이 있을 수도 있음 (장기대출 등)
-    var debtSec = detectSection(cell0);
-    // 계좌명: B열, 금액: C열(r[2]) 또는 D열(r[3])
-    var name = cell1;
-    var amtStr = String(r[2]||"").replace(/,/g,"").trim();
-    if (!amtStr || isNaN(parseFloat(amtStr))) amtStr = String(r[3]||"").replace(/,/g,"").trim();
-    var amt = parseFloat(amtStr);
-    if (!name || isNaN(amt) || amt <= 0) continue;
-    if (currentSection==="free") freeAccounts.push({name:name, amount:amt});
-    else if (currentSection==="saving") savingAccounts.push({name:name, amount:amt});
-    else if (currentSection==="invest") investAccounts.push({name:name, amount:amt});
-    else if (currentSection==="debt") debts.push({name:name, amount:amt});
+    var a0 = String(r[0]||"").trim(); // A열: 자산 항목구분
+    var a1 = String(r[1]||"").trim(); // B열: 자산 상품명
+    var a2 = String(r[2]||"").replace(/,/g,"").trim(); // C열: 자산 금액
+    var d0 = String(r[3]||"").trim(); // D열: 부채 항목구분
+    var d1 = String(r[4]||"").trim(); // E열: 부채 상품명
+    var d2 = String(r[5]||"").replace(/,/g,"").trim(); // F열: 부채 금액
+
+    // 자산 섹션 감지
+    if (ASSET_SECTIONS[a0] !== undefined) {
+      assetSection = ASSET_SECTIONS[a0];
+    }
+
+    // 자산 항목 파싱 (B열에 상품명, C열에 금액)
+    if (a1 && a2 && !isNaN(parseFloat(a2)) && parseFloat(a2) > 0) {
+      var amt = parseFloat(a2);
+      if (assetSection === "free") freeAccounts.push({name:a1, amount:amt});
+      else if (assetSection === "saving") savingAccounts.push({name:a1, amount:amt});
+      else if (assetSection === "invest") investAccounts.push({name:a1, amount:amt});
+    }
+
+    // 부채 항목 파싱 (D열에 항목구분, E열에 상품명, F열에 금액)
+    if (d1 && d2 && !isNaN(parseFloat(d2)) && parseFloat(d2) > 0) {
+      debts.push({name:d1, type:d0, amount:parseFloat(d2)});
+    }
   }
+
   assetData.freeAccounts = freeAccounts;
   assetData.savingAccounts = savingAccounts;
   assetData.investAccounts = investAccounts;
   assetData.debts = debts;
-  // 투자성 자산 → 투자현황 자동 연동 (기존에 없는 항목만)
+
+  // 투자성 자산 -> 투자현황 자동 연동 (기존에 없는 항목만)
   if (investAccounts.length) {
     if (!assetData.investments) assetData.investments = [];
-    var existNames = assetData.investments.map(function(x){return x.name;});
+    var existNames = assetData.investments.filter(function(x){return x.fromAsset;}).map(function(x){return x.name;});
+    // 기존 fromAsset 항목 제거 후 재추가 (업데이트 반영)
+    assetData.investments = assetData.investments.filter(function(x){return !x.fromAsset;});
     investAccounts.forEach(function(a){
-      if (existNames.indexOf(a.name)<0) {
-        assetData.investments.push({name:a.name, purchase:a.amount, current:a.amount, fromAsset:true});
-      }
+      assetData.investments.push({name:a.name, purchase:a.amount, current:a.amount, fromAsset:true});
     });
   }
 }
