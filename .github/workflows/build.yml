@@ -17,11 +17,15 @@ jobs:
         run: pip install pywebview pyinstaller
       - name: Build exe
         run: pyinstaller budget.spec
-      - name: Upload exe
+      - name: Copy app.html to dist
+        run: copy app.html dist\
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: 가계부-Windows
-          path: dist/가계부.exe
+          path: |
+            dist/가계부.exe
+            dist/app.html
 
   build-mac:
     runs-on: macos-latest
@@ -36,7 +40,7 @@ jobs:
         run: pyinstaller budget.spec
       - name: Zip app
         run: cd dist && zip -r 가계부-Mac.zip 가계부.app
-      - name: Upload app
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: 가계부-Mac
