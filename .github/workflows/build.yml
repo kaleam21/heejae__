@@ -1,47 +1,140 @@
-name: Build
+name: Build & Release
 
 on:
   push:
-    branches: [ main ]
+    tags:
+      - 'v*'        # v1.2.0 처럼 태그 붙여서 push하면 자동 실행
   workflow_dispatch:
+    inputs:
+      version:
+        description: '버전 (예: 1.2.0)'
+        required: true
+        default: '1.1.0'
 
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
+
+      - name: Install Python dependencies
         run: pip install pywebview pyinstaller
+
       - name: Build 가계부.exe
         run: pyinstaller budget.spec
+
       - name: Build updater.exe
         run: pyinstaller --onefile --noconsole --name updater updater.py
-      - name: Upload Windows
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Get version
+        id: version
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $v = "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            $v = "${{ github.event.inputs.version }}"
+          }
+          echo "VERSION=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Update NSIS version
+        run: |
+          $ver = "${{ steps.version.outputs.VERSION }}"
+          (Get-Content installer.nsi) -replace '!define APP_VERSION ".*"', "!define APP_VERSION `"$ver`"" | Set-Content installer.nsi
+
+      - name: Copy files for NSIS
+        run: |
+          copy dist\가계부.exe .
+          copy dist\updater.exe .
+
+      - name: Build installer
+        run: makensis installer.nsi
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: 가계부-Windows
           path: |
             dist/가계부.exe
             dist/updater.exe
+            가계부_설치파일_v${{ steps.version.outputs.VERSION }}.exe
 
   build-mac:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install dependencies
         run: pip install pywebview pyinstaller
+
       - name: Build app
         run: pyinstaller budget.spec
+
       - name: Zip app
         run: cd dist && zip -r 가계부-Mac.zip 가계부.app
+
       - name: Upload Mac
         uses: actions/upload-artifact@v4
         with:
           name: 가계부-Mac
           path: dist/가계부-Mac.zip
+
+  release:
+    needs: [build-windows, build-mac]
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: 가계부-Windows
+          path: ./release-files
+
+      - name: Download Mac artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: 가계부-Mac
+          path: ./release-files
+
+      - name: List files
+        run: ls -la ./release-files/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 내 가계부 v${{ steps.version.outputs.VERSION }}
+          body: |
+            ## 내 가계부 v${{ steps.version.outputs.VERSION }}
+
+            ### 설치 방법
+            - **Windows**: `가계부_설치파일_v${{ steps.version.outputs.VERSION }}.exe` 다운로드 후 실행
+            - **Mac**: `가계부-Mac.zip` 압축 해제 후 실행
+
+            ### 자동 업데이트
+            기존 사용자는 앱 실행 시 자동으로 업데이트 알림이 표시됩니다.
+          files: |
+            ./release-files/*.exe
+            ./release-files/*.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
