@@ -477,6 +477,16 @@ function parseAssetSheet(ws) {
   var freeAccounts = [], savingAccounts = [], investAccounts = [], debts = [];
   var assetSection = "none";
 
+  console.log("=== 재무현황 시트 파싱 시작, 총 행수:", raw.length);
+
+  // 첫 20행 모든 셀 출력해서 구조 파악
+  for (var i=0; i<Math.min(raw.length,20); i++) {
+    var r = raw[i];
+    var cells = [];
+    for (var c=0; c<8; c++) cells.push('"'+String(r[c]||"")+'"');
+    console.log("행"+i+":", cells.join("|"));
+  }
+
   var ASSET_SEC_MAP = {
     "자유입출금 자산": "free",
     "저축성 자산": "saving",
@@ -491,26 +501,25 @@ function parseAssetSheet(ws) {
     "연금 자산": "skip"
   };
 
-  console.log("=== 재무현황 시트 파싱 시작, 총 행수:", raw.length);
-
   for (var i=0; i<raw.length; i++) {
     var r = raw[i];
-    // 모든 셀을 문자열로 변환
-    var cells = [];
-    for (var c=0; c<8; c++) cells.push(String(r[c]||"").trim());
+    var a0=String(r[0]||"").trim();
+    var a1=String(r[1]||"").trim();
+    var a2=String(r[2]||"").replace(/,/g,"").trim();
+    var d3=String(r[3]||"").trim();
+    var d4=String(r[4]||"").trim();
+    var d5=String(r[5]||"").replace(/,/g,"").trim();
 
-    var a0=cells[0], a1=cells[1], a2=cells[2]; // 자산: A=구분, B=상품명, C=금액
-    var d3=cells[3], d4=cells[4], d5=cells[5]; // 부채: D=구분, E=상품명, F=금액
-
-    // 자산 섹션 감지 (A열)
+    // 섹션 감지
     if (ASSET_SEC_MAP[a0] !== undefined) {
       assetSection = ASSET_SEC_MAP[a0];
       console.log("섹션 변경:", a0, "->", assetSection);
+      continue;
     }
 
     // 자산 파싱: B열=상품명, C열=금액
     if (a1 && assetSection !== "none" && assetSection !== "skip") {
-      var amtA = parseFloat(a2.replace(/,/g,""));
+      var amtA = parseFloat(a2);
       if (!isNaN(amtA) && amtA > 0) {
         console.log("자산 발견:", assetSection, a1, amtA);
         if (assetSection === "free") freeAccounts.push({name:a1, amount:amtA});
@@ -519,9 +528,9 @@ function parseAssetSheet(ws) {
       }
     }
 
-    // 부채 파싱: E열=상품명, F열=금액 (D열은 구분)
+    // 부채 파싱: E열=상품명, F열=금액
     if (d4) {
-      var amtD = parseFloat(d5.replace(/,/g,""));
+      var amtD = parseFloat(d5);
       if (!isNaN(amtD) && amtD > 0) {
         console.log("부채 발견:", d3, d4, amtD);
         debts.push({name:d4, type:d3, amount:amtD});
@@ -536,7 +545,6 @@ function parseAssetSheet(ws) {
   assetData.investAccounts = investAccounts;
   assetData.debts = debts;
 
-  // 투자성 자산 -> 투자현황 자동 연동 (매번 갱신)
   assetData.investments = (assetData.investments||[]).filter(function(x){return !x.fromAsset;});
   investAccounts.forEach(function(a){
     assetData.investments.push({name:a.name, purchase:a.amount, current:a.amount, fromAsset:true});
@@ -1111,7 +1119,7 @@ function showDayModal(day){
 
 function showUploadModal(){document.getElementById("upload-modal").classList.remove("hidden");}
 // ── 관리자 모드 ──────────────────────────────────────────
-var ADMIN_KEY = "kaleam21";
+var ADMIN_KEY = "zhfldk2017!";
 var adminLogs = [];
 
 function adminLog(msg) {
