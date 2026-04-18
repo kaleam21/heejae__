@@ -25,7 +25,7 @@ jobs:
         run: pyinstaller --onefile --noconsole --name updater updater.py
 
       - name: Install NSIS
-        run: choco install nsis -y
+        run: choco install nsis -y --no-progress
 
       - name: Get version from main.py
         id: version
@@ -44,7 +44,9 @@ jobs:
           copy dist\updater.exe .
 
       - name: Build installer
-        run: makensis installer.nsi
+        run: |
+          $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          & $nsis installer.nsi
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
