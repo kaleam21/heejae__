@@ -24,10 +24,9 @@ Unicode True
 
 Section "메인 프로그램" SecMain
   SetOutPath "$INSTDIR"
-  File "${APP_EXE}"
-  File "${UPDATER_EXE}"
+  File "dist\가계부.exe"
+  File "dist\updater.exe"
 
-  ; 레지스트리 등록
   WriteRegStr HKLM "Software\${APP_NAME}" "Install_Dir" "$INSTDIR"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayName" "${APP_NAME}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayVersion" "${APP_VERSION}"
@@ -35,14 +34,9 @@ Section "메인 프로그램" SecMain
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "NoRepair" 1
-
-  ; 언인스톨러 생성
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
-  ; 바탕화면 바로가기
   CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}"
-
-  ; 시작 메뉴 바로가기
   CreateDirectory "$SMPROGRAMS\${APP_NAME}"
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}"
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\제거.lnk" "$INSTDIR\uninstall.exe"
