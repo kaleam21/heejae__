@@ -2,14 +2,8 @@ name: Build & Release
 
 on:
   push:
-    tags:
-      - 'v*'        # v1.2.0 처럼 태그 붙여서 push하면 자동 실행
+    branches: [ main ]
   workflow_dispatch:
-    inputs:
-      version:
-        description: '버전 (예: 1.2.0)'
-        required: true
-        default: '1.1.0'
 
 jobs:
   build-windows:
@@ -33,14 +27,10 @@ jobs:
       - name: Install NSIS
         run: choco install nsis -y
 
-      - name: Get version
+      - name: Get version from main.py
         id: version
         run: |
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $v = "${{ github.ref_name }}".TrimStart("v")
-          } else {
-            $v = "${{ github.event.inputs.version }}"
-          }
+          $v = (Select-String -Path main.py -Pattern 'CURRENT_VERSION = "(.+)"').Matches[0].Groups[1].Value
           echo "VERSION=$v" >> $env:GITHUB_OUTPUT
 
       - name: Update NSIS version
@@ -56,7 +46,7 @@ jobs:
       - name: Build installer
         run: makensis installer.nsi
 
-      - name: Upload artifacts
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: 가계부-Windows
@@ -88,53 +78,3 @@ jobs:
         with:
           name: 가계부-Mac
           path: dist/가계부-Mac.zip
-
-  release:
-    needs: [build-windows, build-mac]
-    runs-on: ubuntu-latest
-    if: github.ref_type == 'tag'
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Get version
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: 가계부-Windows
-          path: ./release-files
-
-      - name: Download Mac artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: 가계부-Mac
-          path: ./release-files
-
-      - name: List files
-        run: ls -la ./release-files/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: 내 가계부 v${{ steps.version.outputs.VERSION }}
-          body: |
-            ## 내 가계부 v${{ steps.version.outputs.VERSION }}
-
-            ### 설치 방법
-            - **Windows**: `가계부_설치파일_v${{ steps.version.outputs.VERSION }}.exe` 다운로드 후 실행
-            - **Mac**: `가계부-Mac.zip` 압축 해제 후 실행
-
-            ### 자동 업데이트
-            기존 사용자는 앱 실행 시 자동으로 업데이트 알림이 표시됩니다.
-          files: |
-            ./release-files/*.exe
-            ./release-files/*.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
