@@ -63,6 +63,11 @@ class Api:
         save_data(data)
         return {'ok': True}
 
+    def open_url(self, url):
+        import webbrowser
+        webbrowser.open(url)
+        return {'ok': True}
+
     def clear_all(self):
         save_data({
             'transactions': [],
