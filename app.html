@@ -315,7 +315,8 @@ tr:hover td{background:var(--bg3)}
       <div id="admin-asset-info" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:11px;font-family:monospace;color:#3B82F6;max-height:200px;overflow-y:auto;white-space:pre-wrap;line-height:1.6">-</div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="adminRefresh()">🔄 데이터 새로고침</button>
+      <button class="btn" onclick="adminRefresh()">🔄 새로고침</button>
+      <button class="btn" onclick="adminCopyLog()">📋 로그 복사</button>
       <button class="btn" onclick="adminClearLog()">로그 지우기</button>
       <button class="btn btn-danger" onclick="if(confirm('모든 데이터 삭제?'))clearAll()">데이터 초기화</button>
       <button class="btn btn-primary" onclick="document.getElementById('admin-modal').classList.add('hidden')">닫기</button>
@@ -504,13 +505,6 @@ function parseAssetSheet(ws) {
 
   console.log("=== 재무현황 시트 파싱 시작, 총 행수:", raw.length);
 
-  // 첫 5행 구조 파악용 로깅
-  for (var i=0; i<Math.min(raw.length,5); i++) {
-    var cells = [];
-    for (var c=0; c<7; c++) cells.push('"'+String(raw[i][c]||"")+'"');
-    console.log("행"+i+":", cells.join("|"));
-  }
-
   var ASSET_SEC_MAP = {
     "자유입출금 자산": "free",
     "저축성 자산": "saving",
@@ -525,28 +519,14 @@ function parseAssetSheet(ws) {
     "연금 자산": "skip"
   };
 
-  // 데이터 시작 행 찾기 (자산/부채 테이블 헤더 행)
-  var dataStart = 0;
   for (var i=0; i<raw.length; i++) {
     var r = raw[i];
-    // "항목" 또는 "자산" 헤더 행 찾기
-    var a0 = String(r[0]||"").trim();
-    var a1 = String(r[1]||"").trim();
-    if (a0==="항목" || a1==="상품명" || a0==="자산") {
-      dataStart = i+1;
-      console.log("데이터 시작 행:", dataStart);
-      break;
-    }
-  }
-
-  for (var i=dataStart; i<raw.length; i++) {
-    var r = raw[i];
-    var a0=String(r[0]||"").trim(); // 항목구분
-    var a1=String(r[1]||"").trim(); // 상품명
-    var a2=String(r[2]||"").replace(/,/g,"").trim(); // 금액
-    var d3=String(r[3]||"").trim(); // 부채 항목구분
-    var d4=String(r[4]||"").trim(); // 부채 상품명
-    var d5=String(r[5]||"").replace(/,/g,"").trim(); // 부채 금액
+    var a0=String(r[0]||"").trim();
+    var a1=String(r[1]||"").trim();
+    var a2=String(r[2]||"").replace(/,/g,"").trim();
+    var d3=String(r[3]||"").trim();
+    var d4=String(r[4]||"").trim();
+    var d5=String(r[5]||"").replace(/,/g,"").trim();
 
     // 자산 섹션 감지 (A열)
     if (ASSET_SEC_MAP[a0] !== undefined) {
@@ -556,16 +536,16 @@ function parseAssetSheet(ws) {
     }
 
     // 합계/순자산 행 스킵
-    if (a1==="총자산" || a1==="순자산" || a0==="총자산" || a0==="순자산") continue;
+    if (a1==="총자산"||a1==="순자산"||a0==="총자산"||a0==="순자산") continue;
 
-    // 자산 파싱
-    if (a1 && assetSection !== "none" && assetSection !== "skip") {
+    // 자산 파싱 (B열=상품명, C열=금액)
+    if (a1 && assetSection!=="none" && assetSection!=="skip") {
       var amtA = parseFloat(a2);
       if (!isNaN(amtA) && amtA > 0) {
         console.log("자산 발견:", assetSection, a1, amtA);
-        if (assetSection === "free") freeAccounts.push({name:a1, amount:amtA});
-        else if (assetSection === "saving") savingAccounts.push({name:a1, amount:amtA});
-        else if (assetSection === "invest") investAccounts.push({name:a1, amount:amtA});
+        if (assetSection==="free") freeAccounts.push({name:a1, amount:amtA});
+        else if (assetSection==="saving") savingAccounts.push({name:a1, amount:amtA});
+        else if (assetSection==="invest") investAccounts.push({name:a1, amount:amtA});
       }
     }
 
@@ -1214,6 +1194,19 @@ function adminRefresh() {
   (assetData.investments||[]).forEach(function(v){ info += "  "+v.name+" 매입:"+v.purchase.toLocaleString()+" 현재:"+v.current.toLocaleString()+"\n"; });
   var el = document.getElementById("admin-asset-info");
   if (el) el.textContent = info || "데이터 없음";
+}
+
+function adminCopyLog() {
+  var text = adminLogs.join("\n");
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function(){ alert("로그가 클립보드에 복사됐어요!"); });
+  } else {
+    var el = document.createElement("textarea");
+    el.value = text; document.body.appendChild(el);
+    el.select(); document.execCommand("copy");
+    document.body.removeChild(el);
+    alert("로그가 클립보드에 복사됐어요!");
+  }
 }
 
 function adminClearLog() {
