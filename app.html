@@ -438,8 +438,7 @@ function parseAssetSheet(ws) {
   var freeAccounts = [], savingAccounts = [], investAccounts = [], debts = [];
   var assetSection = "none";
 
-  // A열(r[0]) 값으로 자산 섹션 판단
-  var ASSET_SECTIONS = {
+  var ASSET_SEC_MAP = {
     "자유입출금 자산": "free",
     "저축성 자산": "saving",
     "투자성 자산": "invest",
@@ -453,49 +452,56 @@ function parseAssetSheet(ws) {
     "연금 자산": "skip"
   };
 
+  console.log("=== 재무현황 시트 파싱 시작, 총 행수:", raw.length);
+
   for (var i=0; i<raw.length; i++) {
     var r = raw[i];
-    var a0 = String(r[0]||"").trim(); // A열: 자산 항목구분
-    var a1 = String(r[1]||"").trim(); // B열: 자산 상품명
-    var a2 = String(r[2]||"").replace(/,/g,"").trim(); // C열: 자산 금액
-    var d0 = String(r[3]||"").trim(); // D열: 부채 항목구분
-    var d1 = String(r[4]||"").trim(); // E열: 부채 상품명
-    var d2 = String(r[5]||"").replace(/,/g,"").trim(); // F열: 부채 금액
+    // 모든 셀을 문자열로 변환
+    var cells = [];
+    for (var c=0; c<8; c++) cells.push(String(r[c]||"").trim());
 
-    // 자산 섹션 감지
-    if (ASSET_SECTIONS[a0] !== undefined) {
-      assetSection = ASSET_SECTIONS[a0];
+    var a0=cells[0], a1=cells[1], a2=cells[2]; // 자산: A=구분, B=상품명, C=금액
+    var d3=cells[3], d4=cells[4], d5=cells[5]; // 부채: D=구분, E=상품명, F=금액
+
+    // 자산 섹션 감지 (A열)
+    if (ASSET_SEC_MAP[a0] !== undefined) {
+      assetSection = ASSET_SEC_MAP[a0];
+      console.log("섹션 변경:", a0, "->", assetSection);
     }
 
-    // 자산 항목 파싱 (B열에 상품명, C열에 금액)
-    if (a1 && a2 && !isNaN(parseFloat(a2)) && parseFloat(a2) > 0) {
-      var amt = parseFloat(a2);
-      if (assetSection === "free") freeAccounts.push({name:a1, amount:amt});
-      else if (assetSection === "saving") savingAccounts.push({name:a1, amount:amt});
-      else if (assetSection === "invest") investAccounts.push({name:a1, amount:amt});
+    // 자산 파싱: B열=상품명, C열=금액
+    if (a1 && assetSection !== "none" && assetSection !== "skip") {
+      var amtA = parseFloat(a2.replace(/,/g,""));
+      if (!isNaN(amtA) && amtA > 0) {
+        console.log("자산 발견:", assetSection, a1, amtA);
+        if (assetSection === "free") freeAccounts.push({name:a1, amount:amtA});
+        else if (assetSection === "saving") savingAccounts.push({name:a1, amount:amtA});
+        else if (assetSection === "invest") investAccounts.push({name:a1, amount:amtA});
+      }
     }
 
-    // 부채 항목 파싱 (D열에 항목구분, E열에 상품명, F열에 금액)
-    if (d1 && d2 && !isNaN(parseFloat(d2)) && parseFloat(d2) > 0) {
-      debts.push({name:d1, type:d0, amount:parseFloat(d2)});
+    // 부채 파싱: E열=상품명, F열=금액 (D열은 구분)
+    if (d4) {
+      var amtD = parseFloat(d5.replace(/,/g,""));
+      if (!isNaN(amtD) && amtD > 0) {
+        console.log("부채 발견:", d3, d4, amtD);
+        debts.push({name:d4, type:d3, amount:amtD});
+      }
     }
   }
+
+  console.log("파싱 결과 - 자유입출금:", freeAccounts.length, "저축성:", savingAccounts.length, "투자성:", investAccounts.length, "부채:", debts.length);
 
   assetData.freeAccounts = freeAccounts;
   assetData.savingAccounts = savingAccounts;
   assetData.investAccounts = investAccounts;
   assetData.debts = debts;
 
-  // 투자성 자산 -> 투자현황 자동 연동 (기존에 없는 항목만)
-  if (investAccounts.length) {
-    if (!assetData.investments) assetData.investments = [];
-    var existNames = assetData.investments.filter(function(x){return x.fromAsset;}).map(function(x){return x.name;});
-    // 기존 fromAsset 항목 제거 후 재추가 (업데이트 반영)
-    assetData.investments = assetData.investments.filter(function(x){return !x.fromAsset;});
-    investAccounts.forEach(function(a){
-      assetData.investments.push({name:a.name, purchase:a.amount, current:a.amount, fromAsset:true});
-    });
-  }
+  // 투자성 자산 -> 투자현황 자동 연동 (매번 갱신)
+  assetData.investments = (assetData.investments||[]).filter(function(x){return !x.fromAsset;});
+  investAccounts.forEach(function(a){
+    assetData.investments.push({name:a.name, purchase:a.amount, current:a.amount, fromAsset:true});
+  });
 }
 
 function analyzeSuggestedFixed() {
