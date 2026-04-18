@@ -33,10 +33,14 @@ jobs:
           $v = (Select-String -Path main.py -Pattern 'CURRENT_VERSION = "(.+)"').Matches[0].Groups[1].Value
           echo "VERSION=$v" >> $env:GITHUB_OUTPUT
 
-      - name: Update NSIS version
+      - name: Update NSIS version and fix encoding
         run: |
           $ver = "${{ steps.version.outputs.VERSION }}"
-          (Get-Content installer.nsi) -replace '!define APP_VERSION ".*"', "!define APP_VERSION `"$ver`"" | Set-Content installer.nsi
+          $content = Get-Content installer.nsi -Raw -Encoding UTF8
+          $content = $content -replace '!define APP_VERSION ".*"', "!define APP_VERSION `"$ver`""
+          # UTF-8 BOM으로 저장 (NSIS 한글 지원)
+          $utf8bom = New-Object System.Text.UTF8Encoding $true
+          [System.IO.File]::WriteAllText("$PWD\installer.nsi", $content, $utf8bom)
 
       - name: Build installer
         run: |
