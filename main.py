@@ -320,19 +320,21 @@ LICENSE_HTML = """<!DOCTYPE html>
     btn.disabled = true;
     btn.textContent = '확인 중...';
     setMsg('서버에 연결 중입니다...', 'info');
-    pywebview.api.submit_license_key(k).then(function(res) {
-      if (res.ok) {
-        setMsg('✅ ' + res.message, 'ok');
-        input.className = 'success';
-        btn.textContent = '등록 완료!';
-        setTimeout(function() { pywebview.api.license_accepted(); }, 1200);
-      } else {
-        setMsg('❌ ' + res.message, 'err');
-        input.className = 'error';
-        btn.disabled = false;
-        btn.textContent = '키 등록하기';
-      }
-    });
+    pywebview.api.submit_license_key(k);
+  }
+
+  function onLicenseResult(ok, message) {
+    if (ok) {
+      setMsg('✅ ' + message, 'ok');
+      input.className = 'success';
+      btn.textContent = '등록 완료!';
+      setTimeout(function() { pywebview.api.license_accepted(); }, 1200);
+    } else {
+      setMsg('❌ ' + message, 'err');
+      input.className = 'error';
+      btn.disabled = false;
+      btn.textContent = '키 등록하기';
+    }
   }
 </script>
 </body>
@@ -445,16 +447,21 @@ class LicenseApi:
         self._window = w
 
     def submit_license_key(self, key):
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(register_key, key)
+        """백그라운드 스레드에서 검증 후 JS 콜백으로 결과 전달"""
+        def _do_verify():
             try:
-                result, msg = future.result(timeout=20)
-            except concurrent.futures.TimeoutError:
-                return {"ok": False, "message": "서버 응답 시간 초과. 다시 시도해주세요."}
-        if result == "ok":
-            return {"ok": True, "message": msg}
-        else:
-            return {"ok": False, "message": msg}
+                result, msg = register_key(key)
+            except Exception as e:
+                result, msg = "net_error", str(e)
+            if self._window:
+                ok = "true" if result == "ok" else "false"
+                safe_msg = msg.replace("'", " ").replace('"', " ").replace("\n", " ")
+                self._window.evaluate_js(
+                    f"onLicenseResult({ok}, '{safe_msg}')"
+                )
+        t = threading.Thread(target=_do_verify, daemon=True)
+        t.start()
+        return {"ok": True, "started": True}
 
     def license_accepted(self):
         if self._window:
