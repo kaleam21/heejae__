@@ -84,15 +84,41 @@ def get_hwid():
         except Exception:
             pass
     elif system == "Darwin":
+        # 방법 1: ioreg로 Hardware UUID (앱 샌드박스에서도 동작)
         try:
-            out = subprocess.check_output(["system_profiler", "SPHardwareDataType"], stderr=subprocess.DEVNULL).decode(errors="ignore")
+            out = subprocess.check_output(
+                ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                stderr=subprocess.DEVNULL
+            ).decode(errors="ignore")
             for line in out.splitlines():
-                if "Serial Number" in line or "Hardware UUID" in line:
-                    val = line.split(":")[-1].strip()
-                    components.append(f"mac_hw:{val}")
-                    break
+                if "IOPlatformUUID" in line:
+                    val = line.split('"')[-2].strip()
+                    if val:
+                        components.append(f"ioreg_uuid:{val}")
+                        break
         except Exception:
             pass
+        # 방법 2: system_profiler fallback
+        if not any("ioreg_uuid" in c for c in components):
+            try:
+                out = subprocess.check_output(
+                    ["system_profiler", "SPHardwareDataType"],
+                    stderr=subprocess.DEVNULL
+                ).decode(errors="ignore")
+                for line in out.splitlines():
+                    if "Hardware UUID" in line:
+                        val = line.split(":")[-1].strip()
+                        if val:
+                            components.append(f"mac_uuid:{val}")
+                            break
+                for line in out.splitlines():
+                    if "Serial Number" in line:
+                        val = line.split(":")[-1].strip()
+                        if val:
+                            components.append(f"mac_serial:{val}")
+                            break
+            except Exception:
+                pass
     elif system == "Linux":
         try:
             with open("/etc/machine-id") as f:
