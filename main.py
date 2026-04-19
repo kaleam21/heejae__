@@ -645,17 +645,21 @@ def run_license_window():
 
 
 if __name__ == "__main__":
-    valid, status = verify_license()
-    if valid:
+    if platform.system() == "Darwin":
+        # macOS는 라이선스 없이 바로 실행
         run_main_app()
     else:
-        reason_map = {
-            "no_license":    "라이선스 없음",
-            "tampered":      "license.json 변조 감지",
-            "hwid_mismatch": "HWID 불일치",
-            "key_deleted":   "키 삭제됨",
-            "revoked":       "키 취소됨",
-            "hwid_changed":  "HWID 변경됨",
-        }
-        print(reason_map.get(status, f"인증 실패: {status}"))
-        run_license_window()
+        valid, status = verify_license()
+        if valid:
+            run_main_app()
+        else:
+            reason_map = {
+                "no_license":    "라이선스 없음",
+                "tampered":      "license.json 변조 감지",
+                "hwid_mismatch": "HWID 불일치",
+                "key_deleted":   "키 삭제됨",
+                "revoked":       "키 취소됨",
+                "hwid_changed":  "HWID 변경됨",
+            }
+            print(reason_map.get(status, f"인증 실패: {status}"))
+            run_license_window()
