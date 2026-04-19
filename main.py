@@ -12,6 +12,7 @@ import urllib.error
 import hashlib
 import platform
 import uuid
+import concurrent.futures
 from pathlib import Path
 
 CURRENT_VERSION = "1.1.0"
@@ -20,7 +21,6 @@ RELEASES_API = "https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest
 
 # ─────────────────────────────────────────────────────────────
 # 🔐 라이선스 설정
-# generate_key.py setup 실행 후 아래 두 값을 교체하세요
 # ─────────────────────────────────────────────────────────────
 GIST_ID = "63f641fed064d6bc7788f0246ed32a1f"
 _OBF_TOKEN = "VnVGR2gwMU9yNDFEcVVqYVZOVzVVOWFzempFb2Y2NEEzU2Z4X3BoZw=="
@@ -51,7 +51,7 @@ LICENSE_FILE = DATA_DIR / "license.json"
 
 
 # ═══════════════════════════════════════════════
-# 🔐 라이선스 모듈 (license.py 내용 인라인 통합)
+# 🔐 라이선스 모듈
 # ═══════════════════════════════════════════════
 
 def _get_token():
@@ -61,39 +61,28 @@ def _get_token():
         return ""
 
 
-def get_hwid() -> str:
-    """PC 고유 식별자 생성"""
+def get_hwid():
     components = []
     system = platform.system()
-
     mac = uuid.getnode()
     if mac != 0:
         components.append(f"mac:{mac}")
-
     if system == "Windows":
         try:
-            out = subprocess.check_output(
-                "vol C:", shell=True, stderr=subprocess.DEVNULL
-            ).decode(errors="ignore")
+            out = subprocess.check_output("vol C:", shell=True, stderr=subprocess.DEVNULL).decode(errors="ignore")
             serial = "".join(c for c in out if c.isalnum())[-10:]
             components.append(f"vol:{serial}")
         except Exception:
             pass
         try:
-            out = subprocess.check_output(
-                "wmic cpu get ProcessorId /value",
-                shell=True, stderr=subprocess.DEVNULL
-            ).decode(errors="ignore")
+            out = subprocess.check_output("wmic cpu get ProcessorId /value", shell=True, stderr=subprocess.DEVNULL).decode(errors="ignore")
             cpu = "".join(c for c in out if c.isalnum())[:16]
             components.append(f"cpu:{cpu}")
         except Exception:
             pass
     elif system == "Darwin":
         try:
-            out = subprocess.check_output(
-                ["system_profiler", "SPHardwareDataType"],
-                stderr=subprocess.DEVNULL
-            ).decode(errors="ignore")
+            out = subprocess.check_output(["system_profiler", "SPHardwareDataType"], stderr=subprocess.DEVNULL).decode(errors="ignore")
             for line in out.splitlines():
                 if "Serial Number" in line or "Hardware UUID" in line:
                     val = line.split(":")[-1].strip()
@@ -107,10 +96,8 @@ def get_hwid() -> str:
                 components.append(f"mid:{f.read().strip()}")
         except Exception:
             pass
-
     if not components:
         components.append(f"platform:{platform.node()}:{platform.machine()}")
-
     raw = "|".join(sorted(components))
     return hashlib.sha256(raw.encode()).hexdigest()[:32].upper()
 
@@ -126,13 +113,8 @@ def _gist_request(method="GET", data=None):
     }
     body = json.dumps(data).encode() if data else None
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=8) as r:
-            return json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        raise Exception(f"HTTP {e.code}")
-    except Exception as e:
-        raise Exception(f"네트워크 오류: {e}")
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read().decode())
 
 
 def _read_db():
@@ -168,28 +150,15 @@ def _save_local_license(key, hwid):
 
 
 def verify_license():
-    """
-    반환: (is_valid: bool, status: str)
-    status: "ok" | "ok_offline" | "no_license" | "tampered" |
-            "hwid_mismatch" | "key_deleted" | "revoked" | "hwid_changed"
-    """
     hwid = get_hwid()
     local = _load_local_license()
-
     if local is None:
         return False, "no_license"
-
-    # 서명 검증
     if local.get("sig") != _local_sig(local.get("key", ""), local.get("hwid", "")):
         return False, "tampered"
-
-    # HWID 검증
     if local.get("hwid") != hwid:
         return False, "hwid_mismatch"
-
     key = local.get("key", "")
-
-    # Gist 실시간 재확인
     try:
         db = _read_db()
         keys = db.get("keys", {})
@@ -202,37 +171,24 @@ def verify_license():
             return False, "hwid_changed"
         return True, "ok"
     except Exception:
-        # 네트워크 오류 → 로컬 캐시로 관대하게 허용
         return True, "ok_offline"
 
 
-def register_key(key: str):
-    """
-    반환: (result: str, message: str)
-    result: "ok" | "not_found" | "duplicate" | "revoked" | "net_error"
-    """
+def register_key(key):
     key = key.strip().upper()
     hwid = get_hwid()
-
     try:
         db = _read_db()
     except Exception as e:
         return "net_error", f"서버 연결 실패: {e}"
-
     keys = db.get("keys", {})
-
     if key not in keys:
         return "not_found", "유효하지 않은 키입니다."
-
     entry = keys[key]
-
     if entry.get("revoked"):
         return "revoked", "취소된 키입니다. 관리자에게 문의하세요."
-
     registered_hwid = entry.get("hwid")
-
     if registered_hwid is None:
-        # 미등록 → 이 PC에 등록
         from datetime import datetime
         entry["hwid"] = hwid
         entry["activated_at"] = datetime.now().isoformat()
@@ -243,18 +199,14 @@ def register_key(key: str):
         _save_local_license(key, hwid)
         return "ok", "등록 완료!"
     elif registered_hwid == hwid:
-        # 이 PC에 이미 등록됨
         _save_local_license(key, hwid)
         return "ok", "인증됨."
     else:
-        return "duplicate", (
-            "이 키는 다른 PC에 이미 등록되어 있습니다.\n"
-            "PC를 변경하려면 관리자에게 문의하세요."
-        )
+        return "duplicate", "이 키는 다른 PC에 이미 등록되어 있습니다.\nPC를 변경하려면 관리자에게 문의하세요."
 
 
 # ═══════════════════════════════════════════════
-# 라이선스 입력 UI HTML
+# 라이선스 UI HTML
 # ═══════════════════════════════════════════════
 
 LICENSE_HTML = """<!DOCTYPE html>
@@ -267,7 +219,7 @@ LICENSE_HTML = """<!DOCTYPE html>
   body {
     background: #0f0f0f;
     color: #e0e0e0;
-    font-family: 'Malgun Gothic', '맑은 고딕', sans-serif;
+    font-family: 'Malgun Gothic', sans-serif;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -285,10 +237,6 @@ LICENSE_HTML = """<!DOCTYPE html>
   .icon { font-size: 52px; margin-bottom: 20px; }
   h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; color: #fff; }
   .sub { font-size: 13px; color: #888; margin-bottom: 36px; line-height: 1.6; }
-  .input-wrap {
-    position: relative;
-    margin-bottom: 16px;
-  }
   input {
     width: 100%;
     background: #111;
@@ -302,6 +250,7 @@ LICENSE_HTML = """<!DOCTYPE html>
     font-family: 'Courier New', monospace;
     transition: border-color 0.2s;
     outline: none;
+    margin-bottom: 16px;
   }
   input:focus { border-color: #4ade80; }
   input.error { border-color: #f87171; }
@@ -317,16 +266,10 @@ LICENSE_HTML = """<!DOCTYPE html>
     font-weight: 700;
     cursor: pointer;
     transition: background 0.2s;
-    margin-top: 4px;
   }
   button:hover { background: #22c55e; }
   button:disabled { background: #333; color: #666; cursor: not-allowed; }
-  .msg {
-    margin-top: 16px;
-    font-size: 13px;
-    min-height: 20px;
-    line-height: 1.5;
-  }
+  .msg { margin-top: 16px; font-size: 13px; min-height: 20px; line-height: 1.5; }
   .msg.err { color: #f87171; }
   .msg.ok { color: #4ade80; }
   .msg.info { color: #60a5fa; }
@@ -338,10 +281,8 @@ LICENSE_HTML = """<!DOCTYPE html>
   <div class="icon">🔐</div>
   <h1>내 가계부 라이선스 등록</h1>
   <p class="sub">이 앱을 사용하려면 라이선스 키가 필요합니다.<br>관리자로부터 받은 키를 입력하세요.</p>
-  <div class="input-wrap">
-    <input type="text" id="key" placeholder="XXXX-XXXX-XXXX-XXXX"
-      maxlength="19" autocomplete="off" spellcheck="false" />
-  </div>
+  <input type="text" id="key" placeholder="XXXX-XXXX-XXXX-XXXX"
+    maxlength="19" autocomplete="off" spellcheck="false" />
   <button id="btn" onclick="submitKey()">키 등록하기</button>
   <div class="msg" id="msg"></div>
   <p class="hint">v""" + CURRENT_VERSION + """ | 1 PC에만 등록 가능합니다</p>
@@ -351,7 +292,6 @@ LICENSE_HTML = """<!DOCTYPE html>
   const btn = document.getElementById('btn');
   const msg = document.getElementById('msg');
 
-  // 자동 하이픈 포맷
   input.addEventListener('input', function() {
     let v = this.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 16);
     let parts = v.match(/.{1,4}/g) || [];
@@ -380,15 +320,12 @@ LICENSE_HTML = """<!DOCTYPE html>
     btn.disabled = true;
     btn.textContent = '확인 중...';
     setMsg('서버에 연결 중입니다...', 'info');
-
     pywebview.api.submit_license_key(k).then(function(res) {
       if (res.ok) {
         setMsg('✅ ' + res.message, 'ok');
         input.className = 'success';
         btn.textContent = '등록 완료!';
-        setTimeout(function() {
-          pywebview.api.license_accepted();
-        }, 1200);
+        setTimeout(function() { pywebview.api.license_accepted(); }, 1200);
       } else {
         setMsg('❌ ' + res.message, 'err');
         input.className = 'error';
@@ -457,7 +394,6 @@ def download_and_update(window, latest_version, download_url):
 
         urllib.request.urlretrieve(download_url, tmp_exe, reporthook)
         window.evaluate_js("showUpdateProgress('설치 중...')")
-
         if is_installer:
             subprocess.Popen([tmp_exe])
             window.evaluate_js("showUpdateProgress('설치 파일을 실행했어요. 설치 후 재시작하세요.')")
@@ -480,13 +416,13 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             if "customCats" not in data: data["customCats"] = []
-            if "assetData" not in data: data["assetData"] = {"accounts":[],"debts":[],"investments":[]}
+            if "assetData" not in data: data["assetData"] = {"accounts": [], "debts": [], "investments": []}
             if "fixed" not in data: data["fixed"] = []
             if "includeDebtInNet" not in data: data["includeDebtInNet"] = False
             return data
     return {
         "transactions": [], "fixed": [], "customCats": [],
-        "assetData": {"accounts":[],"debts":[],"investments":[]},
+        "assetData": {"accounts": [], "debts": [], "investments": []},
         "includeDebtInNet": False
     }
 
@@ -501,7 +437,6 @@ def save_data(data):
 # ═══════════════════════════════════════════════
 
 class LicenseApi:
-    """라이선스 입력 창 전용 API"""
     def __init__(self, on_accept):
         self._on_accept = on_accept
         self._window = None
@@ -509,21 +444,19 @@ class LicenseApi:
     def set_window(self, w):
         self._window = w
 
-   def submit_license_key(self, key):
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        future = executor.submit(register_key, key)
-        try:
-            result, msg = future.result(timeout=15)
-        except concurrent.futures.TimeoutError:
-            return {"ok": False, "message": "서버 응답 시간 초과. 다시 시도해주세요."}
-    if result == "ok":
-        return {"ok": True, "message": msg}
-    else:
-        return {"ok": False, "message": msg}
+    def submit_license_key(self, key):
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(register_key, key)
+            try:
+                result, msg = future.result(timeout=20)
+            except concurrent.futures.TimeoutError:
+                return {"ok": False, "message": "서버 응답 시간 초과. 다시 시도해주세요."}
+        if result == "ok":
+            return {"ok": True, "message": msg}
+        else:
+            return {"ok": False, "message": msg}
 
     def license_accepted(self):
-        """등록 성공 후 메인 앱 실행"""
         if self._window:
             self._window.destroy()
         self._on_accept()
@@ -552,10 +485,7 @@ class Api:
 
     def do_update(self, version):
         if self._window and self._update_url:
-            t = threading.Thread(
-                target=download_and_update,
-                args=(self._window, version, self._update_url)
-            )
+            t = threading.Thread(target=download_and_update, args=(self._window, version, self._update_url))
             t.daemon = True
             t.start()
         return {"ok": True}
@@ -583,14 +513,14 @@ class Api:
     def clear_all(self):
         save_data({
             "transactions": [], "fixed": [], "customCats": [],
-            "assetData": {"accounts":[],"debts":[],"investments":[]},
+            "assetData": {"accounts": [], "debts": [], "investments": []},
             "includeDebtInNet": False
         })
         return {"ok": True}
 
 
 # ═══════════════════════════════════════════════
-# 메인 앱 실행
+# 실행
 # ═══════════════════════════════════════════════
 
 def run_main_app():
@@ -628,19 +558,13 @@ def run_main_app():
 
 
 def run_license_window():
-    """라이선스 등록 창 실행. 등록 성공 시 메인 앱 실행."""
     accepted = threading.Event()
 
     def on_accept():
         accepted.set()
 
     lic_api = LicenseApi(on_accept=on_accept)
-
-    # HTML을 임시 파일로
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".html", delete=False,
-        prefix="license_", encoding="utf-8"
-    )
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False, prefix="license_", encoding="utf-8")
     tmp.write(LICENSE_HTML)
     tmp.close()
 
@@ -663,25 +587,20 @@ def run_license_window():
 
     if accepted.is_set():
         run_main_app()
-    # 등록 안 하고 창 닫으면 앱 종료
 
 
 if __name__ == "__main__":
     valid, status = verify_license()
-
     if valid:
-        # ✅ 인증됨 → 바로 메인 앱
         run_main_app()
     else:
-        # ❌ 미인증 → 라이선스 등록 창
-        # 사유별 간단 로그 (콘솔 빌드일 때만 보임)
         reason_map = {
-            "no_license":    "라이선스 없음 → 등록 창",
-            "tampered":      "license.json 변조 감지 → 등록 창",
-            "hwid_mismatch": "HWID 불일치 (다른 PC의 파일) → 등록 창",
-            "key_deleted":   "키가 삭제됨 → 등록 창",
-            "revoked":       "키가 취소됨 → 등록 창",
-            "hwid_changed":  "서버의 HWID 변경됨 → 등록 창",
+            "no_license":    "라이선스 없음",
+            "tampered":      "license.json 변조 감지",
+            "hwid_mismatch": "HWID 불일치",
+            "key_deleted":   "키 삭제됨",
+            "revoked":       "키 취소됨",
+            "hwid_changed":  "HWID 변경됨",
         }
         print(reason_map.get(status, f"인증 실패: {status}"))
         run_license_window()
