@@ -8,6 +8,8 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
     steps:
       - uses: actions/checkout@v4
 
@@ -38,7 +40,6 @@ jobs:
           $ver = "${{ steps.version.outputs.VERSION }}"
           $content = Get-Content installer.nsi -Raw -Encoding UTF8
           $content = $content -replace '!define APP_VERSION ".*"', "!define APP_VERSION `"$ver`""
-          # UTF-8 BOM으로 저장 (NSIS 한글 지원)
           $utf8bom = New-Object System.Text.UTF8Encoding $true
           [System.IO.File]::WriteAllText("$PWD\installer.nsi", $content, $utf8bom)
 
@@ -49,7 +50,7 @@ jobs:
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: 가계부-Windows
+          name: Windows-Build
           path: |
             dist/budget.exe
             dist/updater.exe
@@ -76,8 +77,47 @@ jobs:
       - name: Zip app
         run: cd dist && zip -r BudgetApp-Mac.zip 가계부.app
 
-      - name: Upload Mac
+      - name: Upload Mac artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: 가계부-Mac
+          name: Mac-Build
           path: dist/BudgetApp-Mac.zip
+
+  release:
+    needs: [build-windows, build-mac]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Windows-Build
+          path: windows-dist
+
+      - name: Download Mac artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Mac-Build
+          path: mac-dist
+
+      - name: List files
+        run: find windows-dist mac-dist -type f
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.build-windows.outputs.version }}
+          name: v${{ needs.build-windows.outputs.version }}
+          body: |
+            ## 내 가계부 v${{ needs.build-windows.outputs.version }}
+
+            ### 다운로드
+            - **Windows**: `BudgetApp_Setup_v${{ needs.build-windows.outputs.version }}.exe` (인스톨러)
+            - **Mac**: `BudgetApp-Mac.zip` (압축 해제 후 사용)
+          files: |
+            windows-dist/BudgetApp_Setup_v${{ needs.build-windows.outputs.version }}.exe
+            windows-dist/dist/budget.exe
+            windows-dist/dist/updater.exe
+            mac-dist/BudgetApp-Mac.zip
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
