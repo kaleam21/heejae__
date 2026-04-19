@@ -38,13 +38,16 @@ def get_html_path():
 
 
 if getattr(sys, "frozen", False):
-    DATA_DIR = Path(sys.executable).parent
     EXE_PATH = Path(sys.executable)
-    UPDATER_PATH = DATA_DIR / "updater.exe"
+    EXE_DIR = EXE_PATH.parent
+    UPDATER_PATH = EXE_DIR / "updater.exe"
+    DATA_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "MyBudget"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 else:
-    DATA_DIR = Path(__file__).parent
     EXE_PATH = None
-    UPDATER_PATH = DATA_DIR / "updater.py"
+    EXE_DIR = Path(__file__).parent
+    UPDATER_PATH = EXE_DIR / "updater.py"
+    DATA_DIR = Path(__file__).parent
 
 DATA_FILE = DATA_DIR / "budget_data.json"
 LICENSE_FILE = DATA_DIR / "license.json"
