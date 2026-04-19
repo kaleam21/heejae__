@@ -16,7 +16,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install pywebview pyinstaller
+        run: pip install pywebview pyinstaller certifi
 
       - name: Build budget.exe
         run: pyinstaller budget.spec
@@ -65,7 +65,10 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pywebview pyinstaller
+        run: pip install pywebview pyinstaller certifi
+
+      - name: Install SSL certificates
+        run: /Applications/Python\ 3.11/Install\ Certificates.command || true
 
       - name: Build app
         run: pyinstaller budget.spec
