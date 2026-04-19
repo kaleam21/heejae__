@@ -509,12 +509,18 @@ class LicenseApi:
     def set_window(self, w):
         self._window = w
 
-    def submit_license_key(self, key):
-        result, msg = register_key(key)
-        if result == "ok":
-            return {"ok": True, "message": msg}
-        else:
-            return {"ok": False, "message": msg}
+   def submit_license_key(self, key):
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(register_key, key)
+        try:
+            result, msg = future.result(timeout=15)
+        except concurrent.futures.TimeoutError:
+            return {"ok": False, "message": "서버 응답 시간 초과. 다시 시도해주세요."}
+    if result == "ok":
+        return {"ok": True, "message": msg}
+    else:
+        return {"ok": False, "message": msg}
 
     def license_accepted(self):
         """등록 성공 후 메인 앱 실행"""
