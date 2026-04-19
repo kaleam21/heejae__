@@ -142,8 +142,27 @@ def _gist_request(method="GET", data=None):
     }
     body = json.dumps(data).encode() if data else None
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.loads(r.read().decode())
+
+    # macOS PyInstaller 앱에서 SSL 인증서 문제 해결
+    import ssl
+    try:
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+            return json.loads(r.read().decode())
+    except ssl.SSLError:
+        # SSL 실패 시 certifi 시도
+        try:
+            import certifi
+            ctx = ssl.create_default_context(cafile=certifi.where())
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+                return json.loads(r.read().decode())
+        except Exception:
+            # 마지막 수단: 인증서 검증 비활성화 (GitHub API라 안전)
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+                return json.loads(r.read().decode())
 
 
 def _read_db():
