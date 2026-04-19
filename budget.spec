@@ -1,17 +1,29 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys
+import os
 
 block_cipher = None
+
+# macOS SSL 인증서 (certifi) 포함
+datas = []
+try:
+    import certifi
+    datas.append((certifi.where(), 'certifi'))
+except ImportError:
+    pass
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=datas,
     hiddenimports=[
         'webview',
         'webview.platforms.winforms',
         'webview.platforms.cocoa',
         'webview.platforms.gtk',
+        'certifi',
+        'ssl',
     ],
     hookspath=[],
     runtime_hooks=[],
